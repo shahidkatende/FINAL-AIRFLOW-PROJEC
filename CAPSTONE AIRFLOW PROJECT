@@ -1,0 +1,44 @@
+from datetime import timedelta
+from airflow import DAG
+from airflow.operators.bash_operator import BashOperator
+from airflow.utils.dates import days_ago
+
+# Define default arguments
+default_args = {
+    'owner': 'shahid',
+    'start_date': days_ago(0),
+    'email': ['mubanda100@gmail.com'],
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+# Define the DAG
+dag = DAG(
+    'process_web_log',
+    default_args=default_args,
+    description='Process web log',
+    schedule_interval=timedelta(days=1),
+)
+
+# Define the tasks
+extract = BashOperator(
+    task_id='extract_data_task',
+    bash_command='cut -d " " -f 1 /home/project/airflow/dags/accesslog.txt > /home/project/airflow/dags/extracted_data.txt',
+    dag=dag,
+)
+
+transform = BashOperator(
+    task_id='transform_data_task',
+    bash_command='grep -v "198.46.149.143" /home/project/airflow/dags/extracted_data.txt > /home/project/airflow/dags/transformed_data.txt',
+    dag=dag,
+)
+
+load = BashOperator(
+    task_id='load_data_task',
+    bash_command='tar -cvf /home/project/airflow/dags/weblog.tar /home/project/airflow/dags/transformed_data.txt',
+    dag=dag,
+)
+
+# Set task dependencies
+extract >> transform >> load
+
