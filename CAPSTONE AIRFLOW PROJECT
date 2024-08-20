@@ -16,29 +16,90 @@ default_args = {
 dag = DAG(
     'process_web_log',
     default_args=default_args,
-    description='Process web log',
+    description='A DAG to process web logs with additional tasks',
     schedule_interval=timedelta(days=1),
+    catchup=False,
 )
 
-# Define the tasks
+# Define the tasks with more complexity
 extract = BashOperator(
     task_id='extract_data_task',
-    bash_command='cut -d " " -f 1 /home/project/airflow/dags/accesslog.txt > /home/project/airflow/dags/extracted_data.txt',
+    bash_command="""
+        if [ -f /home/project/airflow/dags/accesslog.txt ]; then
+            cut -d " " -f 1 /home/project/airflow/dags/accesslog.txt > /home/project/airflow/dags/extracted_data.txt
+            echo "Data extraction completed."
+        else
+            echo "Source file does not exist." >&2
+            exit 1
+        fi
+    """,
+    dag=dag,
+)
+
+compress = BashOperator(
+    task_id='compress_data_task',
+    bash_command="""
+        if [ -f /home/project/airflow/dags/extracted_data.txt ]; then
+            gzip /home/project/airflow/dags/extracted_data.txt
+            echo "Data compression completed."
+        else
+            echo "Extracted data file does not exist." >&2
+            exit 1
+        fi
+    """,
     dag=dag,
 )
 
 transform = BashOperator(
     task_id='transform_data_task',
-    bash_command='grep -v "198.46.149.143" /home/project/airflow/dags/extracted_data.txt > /home/project/airflow/dags/transformed_data.txt',
+    bash_command="""
+        if [ -f /home/project/airflow/dags/extracted_data.txt.gz ]; then
+            gunzip -c /home/project/airflow/dags/extracted_data.txt.gz | grep -v "198.46.149.143" > /home/project/airflow/dags/transformed_data.txt
+            echo "Data transformation completed."
+        else
+            echo "Compressed data file does not exist." >&2
+            exit 1
+        fi
+    """,
+    dag=dag,
+)
+
+encrypt = BashOperator(
+    task_id='encrypt_data_task',
+    bash_command="""
+        if [ -f /home/project/airflow/dags/transformed_data.txt ]; then
+            openssl enc -aes-256-cbc -salt -in /home/project/airflow/dags/transformed_data.txt -out /home/project/airflow/dags/transformed_data.txt.enc -k YOUR_SECRET_PASSWORD
+            echo "Data encryption completed."
+        else
+            echo "Transformed data file does not exist." >&2
+            exit 1
+        fi
+    """,
     dag=dag,
 )
 
 load = BashOperator(
     task_id='load_data_task',
-    bash_command='tar -cvf /home/project/airflow/dags/weblog.tar /home/project/airflow/dags/transformed_data.txt',
+    bash_command="""
+        if [ -f /home/project/airflow/dags/transformed_data.txt.enc ]; then
+            tar -cvf /home/project/airflow/dags/weblog.tar /home/project/airflow/dags/transformed_data.txt.enc
+            echo "Data loading and archiving completed."
+        else
+            echo "Encrypted data file does not exist." >&2
+            exit 1
+        fi
+    """,
+    dag=dag,
+)
+
+cleanup = BashOperator(
+    task_id='cleanup_task',
+    bash_command="""
+        rm -f /home/project/airflow/dags/extracted_data.txt.gz /home/project/airflow/dags/transformed_data.txt
+        echo "Cleanup completed."
+    """,
     dag=dag,
 )
 
 # Set task dependencies
-extract >> transform >> load
-
+extract >> compress >> transform >> encrypt >> load >> cleanup
